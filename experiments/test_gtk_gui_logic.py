@@ -43,6 +43,8 @@ io2 = PlcIO("and_test", 4, 4)
 gate = AndGate(1, 2, 1)
 check("__str__ contains AND",  "AND" in str(gate), True)
 check("ld_type",               gate.ld_type(), "AND")
+check("AND get_inputs",        gate.get_inputs(), [1, 2])
+check("AND get_outputs",       gate.get_outputs(), [1])
 
 io2.set_input(1, False); io2.set_input(2, False)
 check("AND(F,F)→F", gate.evaluate(io2), False)
@@ -65,7 +67,9 @@ check("AND cell 2 type COIL",   cells[2]["type"], "COIL")
 print("\n=== OrGate ===")
 io3 = PlcIO("or_test", 4, 4)
 gate_or = OrGate(1, 2, 1)
-check("OR ld_type",  gate_or.ld_type(), "OR")
+check("OR ld_type",      gate_or.ld_type(), "OR")
+check("OR get_inputs",   gate_or.get_inputs(), [1, 2])
+check("OR get_outputs",  gate_or.get_outputs(), [1])
 
 io3.set_input(1, False); io3.set_input(2, False)
 check("OR(F,F)→F", gate_or.evaluate(io3), False)
@@ -86,7 +90,9 @@ check("OR cell 2 type COIL",      cells_or[2]["type"], "COIL")
 print("\n=== NotGate ===")
 io4 = PlcIO("not_test", 4, 4)
 gate_not = NotGate(1, 1)
-check("NOT ld_type", gate_not.ld_type(), "NOT")
+check("NOT ld_type",     gate_not.ld_type(), "NOT")
+check("NOT get_inputs",  gate_not.get_inputs(), [1])
+check("NOT get_outputs", gate_not.get_outputs(), [1])
 
 io4.set_input(1, False)
 check("NOT(F)→T", gate_not.evaluate(io4), True)
@@ -103,7 +109,9 @@ check("NOT cell 1 type COIL",  cells_not[1]["type"], "COIL")
 print("\n=== RSTrigger ===")
 io5 = PlcIO("rs_test", 4, 4)
 rs = RSTrigger(1, 2, 1)
-check("RS ld_type",  rs.ld_type(), "RS")
+check("RS ld_type",     rs.ld_type(), "RS")
+check("RS get_inputs",  rs.get_inputs(), [1, 2])
+check("RS get_outputs", rs.get_outputs(), [1])
 
 io5.set_input(1, False); io5.set_input(2, False)
 check("RS idle → F", rs.evaluate(io5), False)
@@ -130,9 +138,33 @@ io6 = PlcIO("prog_test", 4, 4)
 prog = LDProgram(io6, "prog")
 check("empty elements", len(prog.get_elements()), 0)
 
-prog.add_element(AndGate(1, 2, 1))
-prog.add_element(NotGate(3, 2))
-check("add elements",   len(prog.get_elements()), 2)
+gate_a = AndGate(1, 2, 1)
+gate_b = NotGate(3, 2)
+gate_c = OrGate(1, 2, 3)
+prog.add_element(gate_a)
+prog.add_element(gate_b)
+prog.add_element(gate_c)
+check("add 3 elements",   len(prog.get_elements()), 3)
+check("element 0 is AND", prog.get_elements()[0].ld_type(), "AND")
+check("element 1 is NOT", prog.get_elements()[1].ld_type(), "NOT")
+check("element 2 is OR",  prog.get_elements()[2].ld_type(), "OR")
+
+# Test move_element (used by drag-and-drop reordering)
+prog.move_element(0, 2)  # Move AND from index 0 to index 2
+check("move 0→2: element 0 is NOT", prog.get_elements()[0].ld_type(), "NOT")
+check("move 0→2: element 1 is OR",  prog.get_elements()[1].ld_type(), "OR")
+check("move 0→2: element 2 is AND", prog.get_elements()[2].ld_type(), "AND")
+
+prog.move_element(2, 0)  # Move AND back to index 0
+check("move 2→0: element 0 is AND", prog.get_elements()[0].ld_type(), "AND")
+check("move 2→0: element 1 is NOT", prog.get_elements()[1].ld_type(), "NOT")
+check("move 2→0: element 2 is OR",  prog.get_elements()[2].ld_type(), "OR")
+
+# Test move_element with out-of-bounds (should not crash)
+prog.move_element(0, 0)   # same index — no change
+check("move no-op: length still 3", len(prog.get_elements()), 3)
+prog.move_element(-1, 0)  # invalid — no change
+check("move invalid: length still 3", len(prog.get_elements()), 3)
 
 io6.set_input(1, True); io6.set_input(2, True); io6.set_input(3, True)
 prog.execute()
@@ -140,9 +172,19 @@ check("AND output after execute", io6.get_output(1), True)
 check("NOT output after execute", io6.get_output(2), False)
 
 prog.remove_element(0)
-check("remove element", len(prog.get_elements()), 1)
+check("remove element: length 2", len(prog.get_elements()), 2)
 prog.clear_elements()
-check("clear elements", len(prog.get_elements()), 0)
+check("clear elements: length 0", len(prog.get_elements()), 0)
+
+# ============================================================
+print("\n=== LDProgram — pin layout helpers ===")
+# Verify _pin_ys static method
+from freeplc_gui_gtk import LDCanvas
+check("pin_ys empty",  LDCanvas._pin_ys(0, 100, 0), [])
+check("pin_ys 1 item", LDCanvas._pin_ys(0, 100, 1), [50])
+ys2 = LDCanvas._pin_ys(0, 90, 2)
+check("pin_ys 2 items count", len(ys2), 2)
+check("pin_ys 2 items ordered", ys2[0] < ys2[1], True)
 
 # ============================================================
 print("\n=== RelayManager ===")
@@ -161,8 +203,14 @@ check("select relay2",              mgr.current_relay.name, "relay2")
 # ============================================================
 print("\n=== Theme import ===")
 from freeplc_gui_gtk import Theme
-check("Theme.BG is string",         isinstance(Theme.BG, str), True)
-check("Theme.ACCENT starts #",      Theme.ACCENT.startswith("#"), True)
+check("Theme.BG is string",              isinstance(Theme.BG, str), True)
+check("Theme.ACCENT starts #",           Theme.ACCENT.startswith("#"), True)
+check("Theme.TOOLBOX_BG exists",         hasattr(Theme, "TOOLBOX_BG"), True)
+check("Theme.RAIL_LEFT_BG exists",       hasattr(Theme, "RAIL_LEFT_BG"), True)
+check("Theme.RAIL_RIGHT_BG exists",      hasattr(Theme, "RAIL_RIGHT_BG"), True)
+check("Theme.PIN_INPUT exists",          hasattr(Theme, "PIN_INPUT"), True)
+check("Theme.PIN_OUTPUT exists",         hasattr(Theme, "PIN_OUTPUT"), True)
+check("Theme.BLOCK_BG exists",           hasattr(Theme, "BLOCK_BG"), True)
 
 # ============================================================
 print("\n=== Summary ===")
