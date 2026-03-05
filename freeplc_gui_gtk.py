@@ -10,6 +10,13 @@ Ladder Diagram rendering uses standard PLC notation:
   - Set Coil (S):                 --(S)--  (RS trigger set)
   - Reset Coil (R):               --(R)--  (RS trigger reset)
   - Each rung is a horizontal rail between left and right power rails.
+
+Canvas layout (Owen Logic style):
+  - Left power rail with input pins (I1..In) on the left side
+  - Right power rail with output pins (Q1..Qn) on the right side
+  - Rungs span between the rails
+  - Function blocks can be dragged from the toolbox onto the canvas
+  - Blocks show inputs on their left side and outputs on their right side
 """
 
 import tkinter as tk
@@ -36,7 +43,7 @@ class Theme:
     BORDER         = "#c0bfbe"
     TEXT           = "#1a1a1a"
     SUBTEXT        = "#5e5c64"
-    CANVAS_BG      = "#ffffff"
+    CANVAS_BG      = "#f8f9fa"
     RUNG_RAIL      = "#2d2d2d"
     CONTACT_FILL   = "#d0e4ff"
     CONTACT_ACTIVE = "#1c71d8"
@@ -46,6 +53,20 @@ class Theme:
     COIL_SET_ACTIVE= "#26a269"
     SELECTED_BG    = "#c6e2ff"
     HOVERED_BG     = "#e8f0fb"
+    BLOCK_BG       = "#ffffff"
+    BLOCK_BORDER   = "#3d3d3d"
+    BLOCK_SELECTED = "#1c71d8"
+    RAIL_LEFT_BG   = "#dbe8ff"
+    RAIL_RIGHT_BG  = "#ffe8e8"
+    PIN_INPUT      = "#1c71d8"
+    PIN_OUTPUT     = "#e01b24"
+    WIRE_COLOR     = "#2d2d2d"
+    WIRE_ACTIVE    = "#1c71d8"
+    TOOLBOX_BG     = "#2b2b2b"
+    TOOLBOX_FG     = "#ffffff"
+    TOOLBOX_BTN_BG = "#3d3d3d"
+    TOOLBOX_BTN_HOVER = "#4a4a4a"
+    TOOLBOX_ACCENT = "#4a9eff"
 
 
 # ============================================================
@@ -53,8 +74,6 @@ class Theme:
 # ============================================================
 
 class PlcIO:
-    """Represents a PLC's I/O channels."""
-
     def __init__(self, name: str, num_inputs: int, num_outputs: int):
         self.name = name
         self.inputs: Dict[int, bool] = {i: False for i in range(1, num_inputs + 1)}
@@ -76,8 +95,6 @@ class PlcIO:
 
 
 class LogicElement:
-    """Abstract base class for LD logic elements."""
-
     def evaluate(self, io: PlcIO) -> bool:
         raise NotImplementedError
 
@@ -85,20 +102,20 @@ class LogicElement:
         raise NotImplementedError
 
     def ld_label(self) -> str:
-        """Short label for LD canvas display."""
         raise NotImplementedError
 
     def ld_type(self) -> str:
-        """One of: 'NO', 'NC', 'COIL', 'SET_COIL', 'RST_COIL', 'AND', 'OR', 'RS'."""
         raise NotImplementedError
 
     def rung_elements(self) -> List[Dict]:
-        """
-        Return a list of dicts describing how to render this element as rung cells.
-        Each dict has: type (NO/NC/COIL/SET_COIL/RST_COIL), label (str)
-        AND and OR gates are rendered as two contacts + one coil on a rung.
-        RS trigger is rendered as two contacts (S/R) + one coil.
-        """
+        raise NotImplementedError
+
+    def get_inputs(self) -> List[int]:
+        """Return list of input channel numbers used by this element."""
+        raise NotImplementedError
+
+    def get_outputs(self) -> List[int]:
+        """Return list of output channel numbers used by this element."""
         raise NotImplementedError
 
 
@@ -129,6 +146,12 @@ class AndGate(LogicElement):
             {"type": "COIL", "label": f"Q{self.output}", "ch": self.output, "kind": "output"},
         ]
 
+    def get_inputs(self) -> List[int]:
+        return [self.input1, self.input2]
+
+    def get_outputs(self) -> List[int]:
+        return [self.output]
+
 
 class OrGate(LogicElement):
     def __init__(self, in1: int, in2: int, out: int):
@@ -152,10 +175,16 @@ class OrGate(LogicElement):
 
     def rung_elements(self) -> List[Dict]:
         return [
-            {"type": "NO",   "label": f"I{self.input1}", "ch": self.input1, "kind": "input"},
+            {"type": "NO",      "label": f"I{self.input1}", "ch": self.input1, "kind": "input"},
             {"type": "OR_JOIN", "label": f"I{self.input2}", "ch": self.input2, "kind": "input"},
-            {"type": "COIL", "label": f"Q{self.output}", "ch": self.output, "kind": "output"},
+            {"type": "COIL",    "label": f"Q{self.output}", "ch": self.output, "kind": "output"},
         ]
+
+    def get_inputs(self) -> List[int]:
+        return [self.input1, self.input2]
+
+    def get_outputs(self) -> List[int]:
+        return [self.output]
 
 
 class NotGate(LogicElement):
@@ -182,6 +211,12 @@ class NotGate(LogicElement):
             {"type": "NC",   "label": f"I{self.input}", "ch": self.input, "kind": "input"},
             {"type": "COIL", "label": f"Q{self.output}", "ch": self.output, "kind": "output"},
         ]
+
+    def get_inputs(self) -> List[int]:
+        return [self.input]
+
+    def get_outputs(self) -> List[int]:
+        return [self.output]
 
 
 class RSTrigger(LogicElement):
@@ -212,15 +247,19 @@ class RSTrigger(LogicElement):
 
     def rung_elements(self) -> List[Dict]:
         return [
-            {"type": "NO",       "label": f"I{self.set_input}",   "ch": self.set_input,   "kind": "input"},
-            {"type": "NO",       "label": f"I{self.reset_input}",  "ch": self.reset_input, "kind": "input"},
-            {"type": "SET_COIL", "label": f"Q{self.output}(S)",    "ch": self.output,      "kind": "output"},
+            {"type": "NO",       "label": f"I{self.set_input}",  "ch": self.set_input,   "kind": "input"},
+            {"type": "NO",       "label": f"I{self.reset_input}", "ch": self.reset_input, "kind": "input"},
+            {"type": "SET_COIL", "label": f"Q{self.output}(S)",   "ch": self.output,      "kind": "output"},
         ]
+
+    def get_inputs(self) -> List[int]:
+        return [self.set_input, self.reset_input]
+
+    def get_outputs(self) -> List[int]:
+        return [self.output]
 
 
 class LDProgram:
-    """Container for logic elements with run/stop support."""
-
     def __init__(self, io: PlcIO, name: str):
         self.io = io
         self.name = name
@@ -237,6 +276,14 @@ class LDProgram:
         with self._lock:
             if 0 <= index < len(self.elements):
                 self.elements.pop(index)
+
+    def move_element(self, from_idx: int, to_idx: int) -> None:
+        """Move element from one position to another (drag-and-drop reordering)."""
+        with self._lock:
+            n = len(self.elements)
+            if 0 <= from_idx < n and 0 <= to_idx < n and from_idx != to_idx:
+                elem = self.elements.pop(from_idx)
+                self.elements.insert(to_idx, elem)
 
     def clear_elements(self) -> None:
         with self._lock:
@@ -273,8 +320,6 @@ class LDProgram:
 
 
 class RelayManager:
-    """Manages multiple PLC relays."""
-
     def __init__(self):
         self.relays: Dict[str, PlcIO] = {}
         self.programs: Dict[str, LDProgram] = {}
@@ -303,24 +348,32 @@ class RelayManager:
 
 
 # ============================================================
-# LD Canvas — visual ladder diagram renderer
+# Canvas layout constants (Owen Logic style)
 # ============================================================
+LEFT_RAIL_W    = 80    # Width of left power rail + input pins area
+RIGHT_RAIL_W   = 80    # Width of right power rail + output pins area
+RUNG_H         = 110   # Height per rung row
+RUNG_TOP_PAD   = 30    # Top padding before first rung
+BLOCK_W        = 120   # Function block width
+BLOCK_H        = 70    # Function block height
+PIN_R          = 6     # Pin circle radius
+WIRE_V_OFFSET  = 20    # Vertical spacing between wires on block
+RAIL_W         = 8     # Power rail bar width
 
-# Rung layout constants
-RUNG_H         = 100   # height per rung (pixels)
-RUNG_TOP_PAD   = 20    # padding above first rung
-RUNG_LABEL_W   = 50    # left rail + rung number area
-CELL_W         = 100   # width per rung cell
-CELL_H         = 60    # height of the element area within a rung
-RAIL_W         = 14    # width of power rails
-RIGHT_RAIL_PAD = 20    # right padding after last cell
 
+# ============================================================
+# LD Canvas — Owen Logic style with draggable function blocks
+# ============================================================
 
 class LDCanvas(tk.Canvas):
     """
-    Visual Ladder Diagram canvas.
-    Renders each logic element as a standard rung with contacts and coils.
-    Supports click-to-select.
+    Visual Ladder Diagram canvas inspired by Owen Logic:
+    - Left rail with input pins (I1..In) on the left side of canvas
+    - Right rail with output pins (Q1..Qn) on the right side
+    - Function blocks (AND/OR/NOT/RS) placed between the rails
+    - Blocks show their input pins on the left and output pins on the right
+    - Rungs connect left rail → block inputs, block outputs → right rail
+    - Blocks can be dragged to reorder rungs
     """
 
     def __init__(self, parent, app, **kwargs):
@@ -329,9 +382,20 @@ class LDCanvas(tk.Canvas):
                          **kwargs)
         self._app = app
         self._selected_rung: Optional[int] = None
-        self._rung_boxes: List[Tuple[int, int, int, int]] = []  # (x1,y1,x2,y2) per rung
-        self.bind("<Button-1>", self._on_click)
-        self.bind("<Configure>", lambda e: self.redraw())
+
+        # Drag state
+        self._drag_rung: Optional[int] = None
+        self._drag_start_y: Optional[int] = None
+        self._drag_ghost_y: Optional[int] = None
+
+        # Rung layout info: list of (y_top, y_bot, block_x, block_y) per rung
+        self._rung_layout: List[Dict] = []
+
+        self.bind("<Button-1>",        self._on_click)
+        self.bind("<ButtonPress-1>",   self._on_press)
+        self.bind("<B1-Motion>",       self._on_drag)
+        self.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Configure>",       lambda e: self.redraw())
 
     @property
     def selected_rung(self) -> Optional[int]:
@@ -343,261 +407,458 @@ class LDCanvas(tk.Canvas):
 
     def redraw(self) -> None:
         self.delete("all")
-        self._rung_boxes.clear()
+        self._rung_layout.clear()
 
         prog = self._app.manager.current_program
         io   = self._app.manager.current_relay
         elements = prog.get_elements() if prog else []
 
-        canvas_w = max(self.winfo_width(), 500)
-        total_h  = RUNG_TOP_PAD + max(len(elements), 1) * RUNG_H + 20
+        canvas_w = max(self.winfo_width(), 600)
+        n_rungs  = max(len(elements), 1)
+        total_h  = RUNG_TOP_PAD + n_rungs * RUNG_H + 40
         self.configure(scrollregion=(0, 0, canvas_w, total_h))
 
-        # ---- Empty state ----
+        # Draw background grid lines for guidance
+        self._draw_grid(canvas_w, total_h)
+
+        # Draw power rails
+        self._draw_rails(canvas_w, total_h, io)
+
         if not elements:
-            self._draw_empty(canvas_w, total_h)
+            self._draw_empty_hint(canvas_w, total_h)
             return
 
         for rung_idx, elem in enumerate(elements):
             y_top = RUNG_TOP_PAD + rung_idx * RUNG_H
             self._draw_rung(rung_idx, elem, io, y_top, canvas_w)
 
-    def _draw_empty(self, w: int, h: int) -> None:
-        self.create_text(w // 2, h // 2,
-                         text="No elements in program.\nUse toolbar to add AND / OR / NOT / RS elements.",
-                         fill=Theme.SUBTEXT, font=("TkDefaultFont", 11),
-                         justify=tk.CENTER)
-        # Draw empty left rail
-        rail_x = RUNG_LABEL_W
-        self.create_rectangle(rail_x - RAIL_W, 10, rail_x, h - 10,
+        # Draw drag ghost if dragging
+        if self._drag_ghost_y is not None and self._drag_rung is not None:
+            self._draw_drag_indicator(canvas_w)
+
+    def _draw_grid(self, w: int, h: int) -> None:
+        """Draw subtle background grid."""
+        for y in range(0, h, RUNG_H):
+            self.create_line(LEFT_RAIL_W, y, w - RIGHT_RAIL_W, y,
+                             fill="#eeeeee", width=1, dash=(4, 8))
+
+    def _draw_rails(self, canvas_w: int, total_h: int, io: Optional[PlcIO]) -> None:
+        """Draw left (input) and right (output) power rails with labeled pins."""
+        # --- Left rail (inputs) ---
+        lx = LEFT_RAIL_W - RAIL_W // 2
+        self.create_rectangle(lx - RAIL_W // 2, 0, lx + RAIL_W // 2, total_h,
                                fill=Theme.RUNG_RAIL, outline="")
+        # Left rail header
+        self.create_rectangle(0, 0, LEFT_RAIL_W, RUNG_TOP_PAD,
+                               fill=Theme.RAIL_LEFT_BG, outline=Theme.BORDER)
+        self.create_text(LEFT_RAIL_W // 2, RUNG_TOP_PAD // 2,
+                         text="INPUTS", fill=Theme.PIN_INPUT,
+                         font=("TkDefaultFont", 7, "bold"))
+
+        # Draw input pin labels on left rail
+        if io:
+            for ch in sorted(io.inputs.keys()):
+                active = io.get_input(ch)
+                # Pin position — evenly spaced in the first portion of canvas height
+                pin_y = RUNG_TOP_PAD + (ch - 1) * (RUNG_H // 2) + RUNG_H // 4
+                pin_x = lx
+                color = Theme.CONTACT_ACTIVE if active else Theme.WIRE_COLOR
+                # Pin circle
+                self.create_oval(pin_x - PIN_R, pin_y - PIN_R,
+                                  pin_x + PIN_R, pin_y + PIN_R,
+                                  fill=color, outline=Theme.BORDER, width=1)
+                # Pin label
+                self.create_text(pin_x - PIN_R - 4, pin_y,
+                                 text=f"I{ch}", fill=Theme.PIN_INPUT if active else Theme.TEXT,
+                                 font=("TkFixedFont", 8, "bold"), anchor=tk.E)
+                # Short horizontal wire from pin to rail
+                self.create_line(pin_x, pin_y, pin_x + PIN_R * 2, pin_y,
+                                 fill=color, width=2)
+
+        # --- Right rail (outputs) ---
+        rx = canvas_w - RIGHT_RAIL_W + RAIL_W // 2
+        self.create_rectangle(rx - RAIL_W // 2, 0, rx + RAIL_W // 2, total_h,
+                               fill=Theme.RUNG_RAIL, outline="")
+        # Right rail header
+        self.create_rectangle(canvas_w - RIGHT_RAIL_W, 0, canvas_w, RUNG_TOP_PAD,
+                               fill=Theme.RAIL_RIGHT_BG, outline=Theme.BORDER)
+        self.create_text(canvas_w - RIGHT_RAIL_W // 2, RUNG_TOP_PAD // 2,
+                         text="OUTPUTS", fill=Theme.PIN_OUTPUT,
+                         font=("TkDefaultFont", 7, "bold"))
+
+        # Draw output pin labels on right rail
+        if io:
+            for ch in sorted(io.outputs.keys()):
+                active = io.get_output(ch)
+                pin_y = RUNG_TOP_PAD + (ch - 1) * (RUNG_H // 2) + RUNG_H // 4
+                pin_x = rx
+                color = Theme.COIL_ACTIVE if active else Theme.WIRE_COLOR
+                self.create_oval(pin_x - PIN_R, pin_y - PIN_R,
+                                  pin_x + PIN_R, pin_y + PIN_R,
+                                  fill=color, outline=Theme.BORDER, width=1)
+                self.create_text(pin_x + PIN_R + 4, pin_y,
+                                 text=f"Q{ch}", fill=Theme.PIN_OUTPUT if active else Theme.TEXT,
+                                 font=("TkFixedFont", 8, "bold"), anchor=tk.W)
+                self.create_line(pin_x - PIN_R * 2, pin_y, pin_x, pin_y,
+                                 fill=color, width=2)
+
+    def _draw_empty_hint(self, w: int, h: int) -> None:
+        cx = LEFT_RAIL_W + (w - LEFT_RAIL_W - RIGHT_RAIL_W) // 2
+        cy = RUNG_TOP_PAD + RUNG_H // 2
+        self.create_text(cx, cy,
+                         text="Drag function blocks from the toolbox\nor use the sidebar to add AND / OR / NOT / RS elements.",
+                         fill=Theme.SUBTEXT, font=("TkDefaultFont", 10),
+                         justify=tk.CENTER)
 
     def _draw_rung(self, idx: int, elem: LogicElement,
                    io: Optional[PlcIO], y_top: int, canvas_w: int) -> None:
-        cells = elem.rung_elements()
-        n_cells = len(cells)
-
-        # Available width between rails
-        usable_w = canvas_w - RUNG_LABEL_W - RAIL_W - RIGHT_RAIL_PAD
-        cell_w = max(CELL_W, usable_w // n_cells)
-        total_rung_w = cell_w * n_cells
-
-        left_rail_x  = RUNG_LABEL_W
-        right_rail_x = left_rail_x + total_rung_w + RAIL_W
-        mid_y        = y_top + RUNG_H // 2
-
+        """Draw one rung: left rail → wires → function block → wires → right rail."""
+        mid_y    = y_top + RUNG_H // 2
         selected = (self._selected_rung == idx)
+        dragging = (self._drag_rung == idx)
 
-        # ---- Background highlight ----
-        if selected:
-            self.create_rectangle(
-                0, y_top, canvas_w, y_top + RUNG_H,
-                fill=Theme.SELECTED_BG, outline=""
-            )
+        # Rung highlight
+        if selected and not dragging:
+            self.create_rectangle(LEFT_RAIL_W, y_top,
+                                   canvas_w - RIGHT_RAIL_W, y_top + RUNG_H,
+                                   fill=Theme.SELECTED_BG, outline="")
+        elif dragging:
+            # Ghost effect while dragging
+            self.create_rectangle(LEFT_RAIL_W, y_top,
+                                   canvas_w - RIGHT_RAIL_W, y_top + RUNG_H,
+                                   fill="#e0e8ff", outline=Theme.ACCENT,
+                                   width=2, dash=(6, 4))
 
-        # ---- Rung index label ----
-        self.create_text(left_rail_x - RAIL_W - 4, mid_y,
+        # Rung number label
+        self.create_text(LEFT_RAIL_W + 6, y_top + 8,
                          text=f"{idx + 1}", fill=Theme.SUBTEXT,
-                         font=("TkFixedFont", 8), anchor=tk.E)
+                         font=("TkFixedFont", 8), anchor=tk.NW)
 
-        # ---- Left power rail ----
-        self.create_rectangle(left_rail_x - RAIL_W, y_top + 8,
-                               left_rail_x, y_top + RUNG_H - 8,
-                               fill=Theme.RUNG_RAIL, outline="")
+        # ---- Function block (Owen Logic style) ----
+        block_area_x = LEFT_RAIL_W
+        block_area_w = canvas_w - LEFT_RAIL_W - RIGHT_RAIL_W
+        bx = block_area_x + (block_area_w - BLOCK_W) // 2  # Center block horizontally
+        by = y_top + (RUNG_H - BLOCK_H) // 2
 
-        # ---- Horizontal rung wire ----
-        self.create_line(left_rail_x, mid_y, right_rail_x, mid_y,
-                         fill=Theme.RUNG_RAIL, width=2)
+        # Horizontal wire: left rail to block left side
+        self.create_line(block_area_x, mid_y, bx, mid_y,
+                         fill=Theme.WIRE_COLOR, width=2)
 
-        # ---- Right power rail ----
-        self.create_rectangle(right_rail_x, y_top + 8,
-                               right_rail_x + RAIL_W, y_top + RUNG_H - 8,
-                               fill=Theme.RUNG_RAIL, outline="")
+        # Horizontal wire: block right side to right rail
+        self.create_line(bx + BLOCK_W, mid_y, canvas_w - RIGHT_RAIL_W, mid_y,
+                         fill=Theme.WIRE_COLOR, width=2)
 
-        # ---- Draw each cell ----
-        for cell_idx, cell in enumerate(cells):
-            cx = left_rail_x + cell_idx * cell_w
-            self._draw_cell(cell, io, cx, mid_y, cell_w)
+        # Draw the function block
+        self._draw_function_block(elem, io, bx, by, idx, selected)
 
-        # ---- Element description text (below rung) ----
-        desc_y = y_top + RUNG_H - 12
-        self.create_text(left_rail_x + 4, desc_y,
-                         text=str(elem), fill=Theme.SUBTEXT,
-                         font=("TkFixedFont", 7), anchor=tk.W)
+        # Store layout for hit-testing and drag
+        self._rung_layout.append({
+            "y_top": y_top,
+            "y_bot": y_top + RUNG_H,
+            "bx": bx, "by": by,
+            "bx2": bx + BLOCK_W, "by2": by + BLOCK_H,
+        })
 
-        # ---- Click bounding box ----
-        self._rung_boxes.append((0, y_top, canvas_w, y_top + RUNG_H))
-
-    def _draw_cell(self, cell: Dict, io: Optional[PlcIO],
-                   x: int, mid_y: int, cell_w: int) -> None:
-        """Draw a single rung cell (contact or coil)."""
-        ctype   = cell["type"]
-        label   = cell["label"]
-        ch      = cell.get("ch")
-        kind    = cell.get("kind", "input")
-
-        cx = x + cell_w // 2   # centre x of the cell
-
-        # Determine active state
-        active = False
-        if io and ch is not None:
-            if kind == "input":
-                active = io.get_input(ch)
-            else:
-                active = io.get_output(ch)
-
-        if ctype == "OR_JOIN":
-            self._draw_or_contact(cx, mid_y, label, active)
-        elif ctype in ("NO", "NC"):
-            self._draw_contact(cx, mid_y, label, active, normally_closed=(ctype == "NC"))
-        elif ctype == "COIL":
-            self._draw_coil(cx, mid_y, label, active, style="normal")
-        elif ctype == "SET_COIL":
-            self._draw_coil(cx, mid_y, label, active, style="set")
-        elif ctype == "RST_COIL":
-            self._draw_coil(cx, mid_y, label, active, style="reset")
-
-    def _draw_contact(self, cx: int, mid_y: int,
-                      label: str, active: bool, normally_closed: bool) -> None:
+    def _draw_function_block(self, elem: LogicElement, io: Optional[PlcIO],
+                              bx: int, by: int, idx: int, selected: bool) -> None:
         """
-        Draw a standard contact symbol:
-          --| |-- (NO) or --|/|-- (NC)
+        Draw an Owen Logic style function block:
+        - Rectangle with function name/type at top
+        - Input pins on the left side (labeled)
+        - Output pins on the right side (labeled)
+        - Wires connecting pins to left/right block edges
         """
-        GAP   = 10   # gap between contact lines
-        H     = 22   # half-height of contact symbol
-        W     = 8    # contact line width (visual tick)
+        gate_type = elem.ld_type()
+        inputs_chs = elem.get_inputs()
+        outputs_chs = elem.get_outputs()
+        n_in  = len(inputs_chs)
+        n_out = len(outputs_chs)
 
-        fill  = Theme.CONTACT_ACTIVE if active else Theme.CONTACT_FILL
-        lx    = cx - GAP
-        rx    = cx + GAP
+        # Active state: check if any output is active
+        active_out = False
+        if io:
+            for ch in outputs_chs:
+                if io.get_output(ch):
+                    active_out = True
+                    break
 
-        # Left contact leg
-        self.create_line(lx - W, mid_y, lx, mid_y,
-                         fill=Theme.RUNG_RAIL, width=2)
-        # Left vertical bar
-        self.create_line(lx, mid_y - H, lx, mid_y + H,
-                         fill=fill if active else Theme.RUNG_RAIL, width=3)
-        # Right vertical bar
-        self.create_line(rx, mid_y - H, rx, mid_y + H,
-                         fill=fill if active else Theme.RUNG_RAIL, width=3)
-        # Right contact leg
-        self.create_line(rx, mid_y, rx + W, mid_y,
-                         fill=Theme.RUNG_RAIL, width=2)
+        active_in = False
+        if io:
+            for ch in inputs_chs:
+                if io.get_input(ch):
+                    active_in = True
+                    break
 
-        # Normally-closed diagonal slash
-        if normally_closed:
-            self.create_line(lx + 2, mid_y + H - 4, rx - 2, mid_y - H + 4,
-                             fill=Theme.DANGER, width=2)
+        # Block border color
+        border_color = Theme.BLOCK_SELECTED if selected else Theme.BLOCK_BORDER
+        if active_out:
+            border_color = Theme.SUCCESS
 
-        # Background rect (hover/active area)
-        r = 4
-        self.create_rectangle(cx - GAP - W - 4, mid_y - H - 4,
-                               cx + GAP + W + 4, mid_y + H + 4,
-                               fill=fill, outline=Theme.ACCENT if active else Theme.BORDER,
-                               width=1)
-        self.tag_lower(self.find_withtag("all")[-1])  # push rect behind lines
+        # ---- Block rectangle ----
+        self.create_rectangle(bx, by, bx + BLOCK_W, by + BLOCK_H,
+                               fill=Theme.BLOCK_BG,
+                               outline=border_color, width=2 if selected else 1)
 
-        # Label above the contact
-        self.create_text(cx, mid_y - H - 10, text=label,
-                         fill=Theme.ACCENT if active else Theme.TEXT,
-                         font=("TkFixedFont", 8, "bold" if active else "normal"),
-                         anchor=tk.S)
+        # ---- Type label at top of block ----
+        type_colors = {
+            "AND": Theme.ACCENT,
+            "OR":  "#7c3aed",
+            "NOT": "#d97706",
+            "RS":  Theme.DANGER,
+        }
+        type_color = type_colors.get(gate_type, Theme.TEXT)
 
-    def _draw_or_contact(self, cx: int, mid_y: int, label: str, active: bool) -> None:
-        """
-        Draw an OR branch contact — the second input shown as a parallel branch.
-        Rendered as a smaller contact symbol below the main wire with branch lines.
-        """
-        GAP    = 10
-        H      = 22
-        W      = 8
-        offset = 32  # vertical offset of parallel branch
+        # Top label bar
+        self.create_rectangle(bx + 1, by + 1, bx + BLOCK_W - 1, by + 20,
+                               fill=type_color, outline="")
+        self.create_text(bx + BLOCK_W // 2, by + 10,
+                         text=gate_type, fill="#ffffff",
+                         font=("TkDefaultFont", 8, "bold"))
 
-        # Branch vertical connectors
-        self.create_line(cx - GAP - W, mid_y, cx - GAP - W, mid_y + offset,
-                         fill=Theme.RUNG_RAIL, width=2)
-        self.create_line(cx + GAP + W, mid_y, cx + GAP + W, mid_y + offset,
-                         fill=Theme.RUNG_RAIL, width=2)
+        # ---- Input pins (left side of block) ----
+        in_pin_ys = self._pin_ys(by + 22, by + BLOCK_H - 4, n_in)
+        for i, (ch, pin_y) in enumerate(zip(inputs_chs, in_pin_ys)):
+            active = io.get_input(ch) if io else False
+            color  = Theme.PIN_INPUT if active else Theme.BORDER
 
-        branch_y = mid_y + offset
-        fill = Theme.CONTACT_ACTIVE if active else Theme.CONTACT_FILL
+            # Horizontal wire stub from block left edge
+            self.create_line(bx - 20, pin_y, bx, pin_y,
+                             fill=color, width=2)
+            # Pin circle on block left edge
+            self.create_oval(bx - PIN_R, pin_y - PIN_R,
+                              bx + PIN_R, pin_y + PIN_R,
+                              fill=color, outline=Theme.BORDER)
+            # Pin label inside block
+            label = f"I{ch}" if elem.ld_type() != "RS" else (
+                f"S:{ch}" if i == 0 else f"R:{ch}")
+            self.create_text(bx + PIN_R + 2, pin_y,
+                             text=label, fill=Theme.TEXT,
+                             font=("TkFixedFont", 7), anchor=tk.W)
 
-        # Contact bars at branch level
-        self.create_line(cx - GAP - W, branch_y, cx - GAP, branch_y,
-                         fill=Theme.RUNG_RAIL, width=2)
-        self.create_line(cx - GAP, branch_y - H, cx - GAP, branch_y + H,
-                         fill=Theme.RUNG_RAIL, width=3)
-        self.create_line(cx + GAP, branch_y - H, cx + GAP, branch_y + H,
-                         fill=Theme.RUNG_RAIL, width=3)
-        self.create_line(cx + GAP, branch_y, cx + GAP + W, branch_y,
-                         fill=Theme.RUNG_RAIL, width=2)
+        # ---- Output pins (right side of block) ----
+        out_pin_ys = self._pin_ys(by + 22, by + BLOCK_H - 4, n_out)
+        for i, (ch, pin_y) in enumerate(zip(outputs_chs, out_pin_ys)):
+            active = io.get_output(ch) if io else False
+            color  = Theme.PIN_OUTPUT if active else Theme.BORDER
 
-        self.create_rectangle(cx - GAP - W - 4, branch_y - H - 4,
-                               cx + GAP + W + 4, branch_y + H + 4,
-                               fill=fill, outline=Theme.ACCENT if active else Theme.BORDER)
-        self.tag_lower(self.find_withtag("all")[-1])
+            # Horizontal wire stub to block right edge
+            self.create_line(bx + BLOCK_W, pin_y, bx + BLOCK_W + 20, pin_y,
+                             fill=color, width=2)
+            # Pin circle on block right edge
+            self.create_oval(bx + BLOCK_W - PIN_R, pin_y - PIN_R,
+                              bx + BLOCK_W + PIN_R, pin_y + PIN_R,
+                              fill=color, outline=Theme.BORDER)
+            # Pin label inside block (right-aligned)
+            label = f"Q{ch}"
+            self.create_text(bx + BLOCK_W - PIN_R - 2, pin_y,
+                             text=label, fill=Theme.TEXT,
+                             font=("TkFixedFont", 7), anchor=tk.E)
 
-        self.create_text(cx, branch_y - H - 10, text=label,
-                         fill=Theme.ACCENT if active else Theme.TEXT,
-                         font=("TkFixedFont", 8))
+        # ---- Active state indicators ----
+        if active_out:
+            # Energized glow effect
+            self.create_rectangle(bx + 2, by + 2, bx + BLOCK_W - 2, by + BLOCK_H - 2,
+                                   fill="", outline=Theme.SUCCESS, width=1)
+            self.create_text(bx + BLOCK_W // 2, by + BLOCK_H - 8,
+                             text="● ACTIVE", fill=Theme.SUCCESS,
+                             font=("TkFixedFont", 6, "bold"))
 
-    def _draw_coil(self, cx: int, mid_y: int,
-                   label: str, active: bool, style: str = "normal") -> None:
-        """
-        Draw a coil symbol: --( )--
-        style: 'normal', 'set', 'reset'
-        """
-        R = 18   # coil radius
-        W = 10   # lead line length
+    @staticmethod
+    def _pin_ys(top: int, bot: int, count: int) -> List[int]:
+        """Evenly space `count` pin y-positions between top and bot."""
+        if count == 0:
+            return []
+        if count == 1:
+            return [(top + bot) // 2]
+        step = (bot - top) // (count + 1)
+        return [top + step * (i + 1) for i in range(count)]
 
-        if style == "set":
-            base_fill = Theme.COIL_SET_FILL
-            act_fill  = Theme.COIL_SET_ACTIVE
-            inner_text = "S"
-        elif style == "reset":
-            base_fill = Theme.COIL_FILL
-            act_fill  = Theme.COIL_ACTIVE
-            inner_text = "R"
-        else:
-            base_fill = Theme.COIL_FILL
-            act_fill  = Theme.COIL_ACTIVE
-            inner_text = ""
+    def _draw_drag_indicator(self, canvas_w: int) -> None:
+        """Draw a blue drop-target line while dragging a rung."""
+        y = self._drag_ghost_y
+        if y is not None:
+            self.create_line(LEFT_RAIL_W, y, canvas_w - RIGHT_RAIL_W, y,
+                             fill=Theme.ACCENT, width=3, dash=(8, 4))
+            self.create_oval(LEFT_RAIL_W - 6, y - 6, LEFT_RAIL_W + 6, y + 6,
+                             fill=Theme.ACCENT, outline="")
+            self.create_oval(canvas_w - RIGHT_RAIL_W - 6, y - 6,
+                              canvas_w - RIGHT_RAIL_W + 6, y + 6,
+                             fill=Theme.ACCENT, outline="")
 
-        fill = act_fill if active else base_fill
-        outline = Theme.DANGER if active else Theme.BORDER
+    # ----------------------------------------------------------
+    # Mouse event handlers
+    # ----------------------------------------------------------
 
-        # Left lead
-        self.create_line(cx - R - W, mid_y, cx - R, mid_y,
-                         fill=Theme.RUNG_RAIL, width=2)
-        # Right lead
-        self.create_line(cx + R, mid_y, cx + R + W, mid_y,
-                         fill=Theme.RUNG_RAIL, width=2)
-        # Circle coil body
-        self.create_oval(cx - R, mid_y - R, cx + R, mid_y + R,
-                         fill=fill, outline=outline, width=2)
+    def _on_press(self, event: Any) -> None:
+        y = self.canvasy(event.y)
+        for i, layout in enumerate(self._rung_layout):
+            if layout["y_top"] <= y <= layout["y_bot"]:
+                self._drag_rung = i
+                self._drag_start_y = y
+                self._drag_ghost_y = None
+                break
 
-        # Inner letter for Set/Reset
-        if inner_text:
-            self.create_text(cx, mid_y, text=inner_text,
-                             fill=Theme.TEXT, font=("TkFixedFont", 9, "bold"))
+    def _on_drag(self, event: Any) -> None:
+        if self._drag_rung is None:
+            return
+        y = self.canvasy(event.y)
+        if abs(y - (self._drag_start_y or y)) > 5:
+            # Determine drop position
+            self._drag_ghost_y = y
+            self.redraw()
 
-        # Label above coil
-        self.create_text(cx, mid_y - R - 10, text=label,
-                         fill=Theme.DANGER if active else Theme.TEXT,
-                         font=("TkFixedFont", 8, "bold" if active else "normal"),
-                         anchor=tk.S)
+    def _on_release(self, event: Any) -> None:
+        if self._drag_rung is None:
+            return
+
+        y = self.canvasy(event.y)
+
+        if self._drag_ghost_y is not None:
+            # Find target rung index from drop y position
+            prog = self._app.manager.current_program
+            if prog:
+                target_idx = self._y_to_rung_index(y)
+                if target_idx is not None and target_idx != self._drag_rung:
+                    prog.move_element(self._drag_rung, target_idx)
+                    self._selected_rung = target_idx
+                    self._app.on_rung_select(target_idx)
+                    self._set_status_after_drop(self._drag_rung, target_idx)
+
+        self._drag_rung = None
+        self._drag_start_y = None
+        self._drag_ghost_y = None
+        self.redraw()
+
+    def _y_to_rung_index(self, y: float) -> Optional[int]:
+        """Return the rung index at a given canvas y position."""
+        n = len(self._rung_layout)
+        if n == 0:
+            return None
+        for i, layout in enumerate(self._rung_layout):
+            mid = (layout["y_top"] + layout["y_bot"]) / 2
+            if y <= mid:
+                return i
+        return n - 1
+
+    def _set_status_after_drop(self, from_idx: int, to_idx: int) -> None:
+        self._app._set_status(f"Moved rung {from_idx + 1} → position {to_idx + 1}.")
 
     def _on_click(self, event: Any) -> None:
+        # Only handle click if not dragging
+        if self._drag_ghost_y is not None:
+            return
+
         y = self.canvasy(event.y)
-        for i, (x1, y1, x2, y2) in enumerate(self._rung_boxes):
-            if y1 <= y <= y2:
+        for i, layout in enumerate(self._rung_layout):
+            if layout["y_top"] <= y <= layout["y_bot"]:
                 self._selected_rung = i
                 self._app.on_rung_select(i)
                 self.redraw()
                 return
+
         self._selected_rung = None
         self._app.on_rung_select(None)
         self.redraw()
+
+
+# ============================================================
+# Toolbox panel — drag-source for function blocks
+# ============================================================
+
+class ToolboxPanel(tk.Frame):
+    """
+    Owen Logic style toolbox panel.
+    Shows available function block types that can be clicked to add to the canvas.
+    """
+
+    FUNCTIONS = [
+        ("AND", "Series contacts\n(I1 AND I2 → Q)", Theme.ACCENT),
+        ("OR",  "Parallel contacts\n(I1 OR I2 → Q)",  "#7c3aed"),
+        ("NOT", "Inverted contact\n(NOT I → Q)",       "#d97706"),
+        ("RS",  "Set/Reset latch\n(S/R → Q)",          Theme.DANGER),
+    ]
+
+    def __init__(self, parent, app, **kwargs):
+        super().__init__(parent, bg=Theme.TOOLBOX_BG, **kwargs)
+        self._app = app
+        self._build()
+
+    def _build(self) -> None:
+        # Header
+        hdr = tk.Frame(self, bg=Theme.HEADERBAR_BG)
+        hdr.pack(fill=tk.X)
+        tk.Label(hdr, text="FUNCTION BLOCKS",
+                 bg=Theme.HEADERBAR_BG, fg=Theme.TOOLBOX_FG,
+                 font=("TkDefaultFont", 8, "bold"),
+                 padx=8, pady=6).pack(side=tk.LEFT)
+
+        # Help text
+        tk.Label(self, text="Click to add to program:",
+                 bg=Theme.TOOLBOX_BG, fg="#aaaaaa",
+                 font=("TkDefaultFont", 7),
+                 padx=6, pady=2).pack(anchor=tk.W)
+
+        # Function block buttons
+        for (gate, desc, color) in self.FUNCTIONS:
+            self._build_block_btn(gate, desc, color)
+
+        # Separator
+        tk.Frame(self, bg=Theme.BORDER, height=1).pack(fill=tk.X, pady=8)
+
+        # Remove / clear actions
+        tk.Label(self, text="ACTIONS",
+                 bg=Theme.TOOLBOX_BG, fg="#aaaaaa",
+                 font=("TkDefaultFont", 7, "bold"),
+                 padx=6).pack(anchor=tk.W)
+
+        self._remove_btn = self._action_btn("✕ Remove Selected", self._app._remove_element,
+                                             danger=True)
+        self._remove_btn.pack(fill=tk.X, padx=6, pady=2)
+
+        self._action_btn("⬆ Move Up",   self._app._move_selected_up).pack(
+            fill=tk.X, padx=6, pady=2)
+        self._action_btn("⬇ Move Down", self._app._move_selected_down).pack(
+            fill=tk.X, padx=6, pady=2)
+        self._action_btn("🗑 Clear All", self._app._clear_program,
+                          danger=True).pack(fill=tk.X, padx=6, pady=2)
+
+    def _build_block_btn(self, gate: str, desc: str, color: str) -> None:
+        frame = tk.Frame(self, bg=Theme.TOOLBOX_BTN_BG,
+                         highlightthickness=1, highlightbackground=color)
+        frame.pack(fill=tk.X, padx=6, pady=4)
+
+        top = tk.Frame(frame, bg=color)
+        top.pack(fill=tk.X)
+        tk.Label(top, text=gate, bg=color, fg="#ffffff",
+                 font=("TkDefaultFont", 11, "bold"),
+                 padx=8, pady=4).pack(side=tk.LEFT)
+
+        tk.Label(frame, text=desc,
+                 bg=Theme.TOOLBOX_BTN_BG, fg="#cccccc",
+                 font=("TkDefaultFont", 7),
+                 justify=tk.LEFT, padx=6, pady=4,
+                 anchor=tk.W).pack(fill=tk.X)
+
+        tk.Button(frame, text=f"+ Add {gate}",
+                  bg=color, fg="#ffffff",
+                  relief=tk.FLAT, padx=6, pady=3,
+                  font=("TkDefaultFont", 8, "bold"),
+                  activebackground=Theme.ACCENT_HOVER,
+                  activeforeground="#ffffff",
+                  cursor="hand2",
+                  command=lambda g=gate: self._app._add_gate(g)).pack(
+            fill=tk.X, padx=6, pady=(0, 6))
+
+    def _action_btn(self, text: str, cmd, danger: bool = False) -> tk.Button:
+        bg = "#8b1a1a" if danger else Theme.TOOLBOX_BTN_BG
+        fg = "#ffaaaa" if danger else "#cccccc"
+        return tk.Button(self, text=text, command=cmd,
+                         bg=bg, fg=fg,
+                         relief=tk.FLAT, padx=8, pady=4,
+                         font=("TkDefaultFont", 8),
+                         activebackground=Theme.ACCENT,
+                         activeforeground="#ffffff",
+                         cursor="hand2")
 
 
 # ============================================================
@@ -605,8 +866,6 @@ class LDCanvas(tk.Canvas):
 # ============================================================
 
 class _GtkDialog(tk.Toplevel):
-    """Base GTK-style dialog."""
-
     def __init__(self, parent, title: str):
         super().__init__(parent)
         self.title(title)
@@ -615,23 +874,19 @@ class _GtkDialog(tk.Toplevel):
         self.transient(parent)
         self.configure(bg=Theme.BG)
 
-        # Header
         header = tk.Frame(self, bg=Theme.HEADERBAR_BG, pady=8)
         header.pack(fill=tk.X)
         tk.Label(header, text=title, font=("TkDefaultFont", 11, "bold"),
                  bg=Theme.HEADERBAR_BG, fg=Theme.HEADERBAR_FG).pack(padx=12)
 
-        # Content area
         self._content = tk.Frame(self, bg=Theme.BG, padx=16, pady=12)
         self._content.pack(fill=tk.BOTH, expand=True)
 
-        # Button row
         self._btn_row = tk.Frame(self, bg=Theme.BG, pady=8)
         self._btn_row.pack(fill=tk.X, padx=16)
 
         self.bind("<Escape>", lambda e: self.destroy())
 
-        # Centre over parent
         self.update_idletasks()
         px = parent.winfo_rootx() + (parent.winfo_width()  - self.winfo_width())  // 2
         py = parent.winfo_rooty() + (parent.winfo_height() - self.winfo_height()) // 2
@@ -666,15 +921,12 @@ class _GtkDialog(tk.Toplevel):
 
 
 class GateDialog(_GtkDialog):
-    """GTK-style dialog for adding a logic gate."""
-
     def __init__(self, parent, gate_type: str, max_inputs: int, max_outputs: int):
         super().__init__(parent, f"Add {gate_type} Element")
         self.result: Optional[LogicElement] = None
         self.gate_type = gate_type
         self._entries: Dict[str, tk.StringVar] = {}
 
-        # Describe element
         desc = {
             "AND": "Normally-open contacts in series → output coil",
             "OR":  "Normally-open contacts in parallel → output coil",
@@ -747,8 +999,6 @@ class GateDialog(_GtkDialog):
 
 
 class CreateRelayDialog(_GtkDialog):
-    """GTK-style dialog for creating a new relay."""
-
     def __init__(self, parent):
         super().__init__(parent, "Create New Relay")
         self.result: Optional[tuple] = None
@@ -791,45 +1041,31 @@ class CreateRelayDialog(_GtkDialog):
 
 
 # ============================================================
-# Main Application Window — GTK/GNOME style
+# Main Application Window — GTK/GNOME style with Owen Logic LD
 # ============================================================
 
 class FreePLCGtkApp(tk.Tk):
-    """
-    Main FreePLC GUI window with GTK/GNOME styling.
-    Features a header bar, side panel, and a visual LD canvas.
-    """
-
     def __init__(self):
         super().__init__()
         self.manager = RelayManager()
         self._update_job: Optional[str] = None
 
         self.title("FreePLC")
-        self.geometry("1100x680")
-        self.minsize(900, 560)
+        self.geometry("1280x760")
+        self.minsize(960, 600)
         self.configure(bg=Theme.BG)
 
         self._build_ui()
         self._refresh_relay_list()
         self._start_io_refresh()
 
-    # ----------------------------------------------------------
-    # UI construction
-    # ----------------------------------------------------------
-
     def _build_ui(self) -> None:
-        # ---- Header bar (GTK HeaderBar style) ----
         self._build_headerbar()
-
-        # ---- Main area: sidebar + LD canvas ----
         main = tk.Frame(self, bg=Theme.BG)
         main.pack(fill=tk.BOTH, expand=True)
-
-        self._build_sidebar(main)
-        self._build_ld_area(main)
-
-        # ---- Status bar ----
+        self._build_toolbox(main)      # Left: dark toolbox panel
+        self._build_ld_area(main)      # Center: LD canvas
+        self._build_sidebar(main)      # Right: relay/IO panel
         self._build_statusbar()
 
     def _build_headerbar(self) -> None:
@@ -837,7 +1073,6 @@ class FreePLCGtkApp(tk.Tk):
         bar.pack(fill=tk.X)
         bar.pack_propagate(False)
 
-        # Left: app title + relay name
         left = tk.Frame(bar, bg=Theme.HEADERBAR_BG)
         left.pack(side=tk.LEFT, padx=12, pady=6)
 
@@ -849,7 +1084,6 @@ class FreePLCGtkApp(tk.Tk):
                                           bg=Theme.HEADERBAR_BG, fg="#b0b0b0")
         self._header_relay_lbl.pack(side=tk.LEFT, padx=(8, 0))
 
-        # Right: run/stop buttons
         right = tk.Frame(bar, bg=Theme.HEADERBAR_BG)
         right.pack(side=tk.RIGHT, padx=12, pady=6)
 
@@ -859,7 +1093,6 @@ class FreePLCGtkApp(tk.Tk):
         self._run_btn = self._hdr_btn(right, "▶  Run",   self._start_program, enabled=True)
         self._run_btn.pack(side=tk.RIGHT, padx=4)
 
-        # Status pill
         self._run_pill = tk.Label(right, text="● STOPPED",
                                   font=("TkDefaultFont", 9, "bold"),
                                   bg=Theme.HEADERBAR_BG, fg=Theme.DANGER)
@@ -877,17 +1110,39 @@ class FreePLCGtkApp(tk.Tk):
                         cursor="hand2", state=state)
         return btn
 
+    def _build_toolbox(self, parent: tk.Frame) -> None:
+        """Left dark toolbox panel (Owen Logic style function block palette)."""
+        toolbox_outer = tk.Frame(parent, bg=Theme.TOOLBOX_BG, width=190)
+        toolbox_outer.pack(side=tk.LEFT, fill=tk.Y)
+        toolbox_outer.pack_propagate(False)
+
+        # Scrollable toolbox
+        vsb = tk.Scrollbar(toolbox_outer, orient=tk.VERTICAL,
+                           bg=Theme.TOOLBOX_BG, troughcolor=Theme.TOOLBOX_BG)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+
+        inner_canvas = tk.Canvas(toolbox_outer, bg=Theme.TOOLBOX_BG,
+                                  yscrollcommand=vsb.set, highlightthickness=0)
+        inner_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        vsb.config(command=inner_canvas.yview)
+
+        self._toolbox = ToolboxPanel(inner_canvas, self)
+        inner_canvas.create_window((0, 0), window=self._toolbox, anchor=tk.NW)
+        self._toolbox.bind("<Configure>",
+                           lambda e: inner_canvas.configure(
+                               scrollregion=inner_canvas.bbox("all")))
+
     def _build_sidebar(self, parent: tk.Frame) -> None:
-        sidebar = tk.Frame(parent, bg=Theme.SIDEBAR_BG, width=230)
-        sidebar.pack(side=tk.LEFT, fill=tk.Y)
+        """Right sidebar: relay selector and I/O status."""
+        sidebar = tk.Frame(parent, bg=Theme.SIDEBAR_BG, width=210)
+        sidebar.pack(side=tk.RIGHT, fill=tk.Y)
         sidebar.pack_propagate(False)
 
-        # ---- Relay section ----
         self._sidebar_section(sidebar, "Relays")
 
         self._relay_listbox = tk.Listbox(
             sidebar, font=("TkDefaultFont", 10),
-            selectmode=tk.SINGLE, height=6,
+            selectmode=tk.SINGLE, height=5,
             bg=Theme.CANVAS_BG, fg=Theme.TEXT,
             selectbackground=Theme.ACCENT,
             selectforeground=Theme.ACCENT_FG,
@@ -901,56 +1156,18 @@ class FreePLCGtkApp(tk.Tk):
         self._relay_listbox.bind("<Double-Button-1>", lambda e: self._select_relay())
 
         btn_row = tk.Frame(sidebar, bg=Theme.SIDEBAR_BG)
-        btn_row.pack(fill=tk.X, padx=8, pady=(0, 8))
-        self._sidebar_btn(btn_row, "＋ New Relay",    self._create_relay).pack(side=tk.LEFT)
-        self._sidebar_btn(btn_row, "✓ Select",        self._select_relay).pack(side=tk.LEFT, padx=(4, 0))
+        btn_row.pack(fill=tk.X, padx=8, pady=(0, 6))
+        self._sidebar_btn(btn_row, "＋ New",    self._create_relay).pack(side=tk.LEFT)
+        self._sidebar_btn(btn_row, "✓ Select",  self._select_relay).pack(side=tk.LEFT, padx=(4, 0))
 
-        # ---- Relay info ----
         self._relay_info = tk.Label(sidebar, text="",
                                     bg=Theme.SIDEBAR_BG, fg=Theme.SUBTEXT,
                                     font=("TkFixedFont", 8),
                                     justify=tk.LEFT, anchor=tk.W, padx=8)
         self._relay_info.pack(fill=tk.X)
 
-        # ---- Separator ----
-        tk.Frame(sidebar, bg=Theme.BORDER, height=1).pack(fill=tk.X, padx=8, pady=8)
+        tk.Frame(sidebar, bg=Theme.BORDER, height=1).pack(fill=tk.X, padx=8, pady=6)
 
-        # ---- LD Elements toolbar ----
-        self._sidebar_section(sidebar, "Add Element")
-
-        for gate in ("AND", "OR", "NOT", "RS"):
-            desc = {"AND": "Series contacts",
-                    "OR":  "Parallel contacts",
-                    "NOT": "Inverted contact",
-                    "RS":  "Set/Reset latch"}[gate]
-            row = tk.Frame(sidebar, bg=Theme.SIDEBAR_BG)
-            row.pack(fill=tk.X, padx=8, pady=2)
-            self._sidebar_btn(row, gate, lambda g=gate: self._add_gate(g),
-                              width=6).pack(side=tk.LEFT)
-            tk.Label(row, text=desc, bg=Theme.SIDEBAR_BG, fg=Theme.SUBTEXT,
-                     font=("TkDefaultFont", 8)).pack(side=tk.LEFT, padx=(6, 0))
-
-        # ---- Separator ----
-        tk.Frame(sidebar, bg=Theme.BORDER, height=1).pack(fill=tk.X, padx=8, pady=8)
-
-        # ---- Program actions ----
-        self._sidebar_section(sidebar, "Program")
-
-        act_row = tk.Frame(sidebar, bg=Theme.SIDEBAR_BG)
-        act_row.pack(fill=tk.X, padx=8, pady=2)
-        self._remove_btn = self._sidebar_btn(act_row, "✕ Remove Selected",
-                                             self._remove_element, danger=True)
-        self._remove_btn.pack(fill=tk.X)
-
-        act_row2 = tk.Frame(sidebar, bg=Theme.SIDEBAR_BG)
-        act_row2.pack(fill=tk.X, padx=8, pady=2)
-        self._sidebar_btn(act_row2, "Clear All", self._clear_program,
-                          danger=True).pack(fill=tk.X)
-
-        # ---- Separator ----
-        tk.Frame(sidebar, bg=Theme.BORDER, height=1).pack(fill=tk.X, padx=8, pady=8)
-
-        # ---- I/O panel ----
         self._sidebar_section(sidebar, "I/O Status")
 
         io_scroll_frame = tk.Frame(sidebar, bg=Theme.SIDEBAR_BG)
@@ -991,17 +1208,23 @@ class FreePLCGtkApp(tk.Tk):
                          cursor="hand2", **kw)
 
     def _build_ld_area(self, parent: tk.Frame) -> None:
-        """Right area: LD canvas + manual I/O control strip at bottom."""
+        """Center area: Ladder Diagram canvas + manual I/O strip."""
         right = tk.Frame(parent, bg=Theme.BG)
         right.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # ---- LD Canvas with scrollbar ----
         ld_frame = tk.Frame(right, bg=Theme.BG)
-        ld_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(8, 4))
+        ld_frame.pack(fill=tk.BOTH, expand=True, padx=4, pady=(4, 0))
 
-        tk.Label(ld_frame, text="Ladder Diagram",
+        # Canvas label
+        lbl_row = tk.Frame(ld_frame, bg=Theme.BG)
+        lbl_row.pack(fill=tk.X, pady=(0, 2))
+        tk.Label(lbl_row, text="Ladder Diagram",
                  bg=Theme.BG, fg=Theme.SUBTEXT,
-                 font=("TkDefaultFont", 8, "bold")).pack(anchor=tk.W)
+                 font=("TkDefaultFont", 8, "bold")).pack(side=tk.LEFT)
+        tk.Label(lbl_row,
+                 text="← inputs on left rail  |  outputs on right rail →  |  drag rungs to reorder",
+                 bg=Theme.BG, fg="#aaaaaa",
+                 font=("TkDefaultFont", 7)).pack(side=tk.LEFT, padx=8)
 
         canvas_frame = tk.Frame(ld_frame, bg=Theme.BG)
         canvas_frame.pack(fill=tk.BOTH, expand=True)
@@ -1018,14 +1241,14 @@ class FreePLCGtkApp(tk.Tk):
         vsb.config(command=self._ld_canvas.yview)
         hsb.config(command=self._ld_canvas.xview)
 
-        # ---- Manual I/O strip ----
+        # Manual I/O strip
         io_strip = tk.LabelFrame(right, text="Manual Input Control",
                                  bg=Theme.BG, fg=Theme.SUBTEXT,
                                  font=("TkDefaultFont", 8, "bold"),
                                  relief=tk.FLAT,
                                  highlightthickness=1,
                                  highlightbackground=Theme.BORDER)
-        io_strip.pack(fill=tk.X, padx=8, pady=(0, 8))
+        io_strip.pack(fill=tk.X, padx=4, pady=(0, 4))
 
         self._manual_io_frame = tk.Frame(io_strip, bg=Theme.BG)
         self._manual_io_frame.pack(fill=tk.X, padx=4, pady=4)
@@ -1047,7 +1270,7 @@ class FreePLCGtkApp(tk.Tk):
         self._scan_lbl.pack(side=tk.RIGHT)
 
     # ----------------------------------------------------------
-    # Relay actions
+    # Relay management
     # ----------------------------------------------------------
 
     def _refresh_relay_list(self) -> None:
@@ -1066,7 +1289,7 @@ class FreePLCGtkApp(tk.Tk):
             self._header_relay_lbl.config(text="")
 
     def _on_relay_click(self, event: Any) -> None:
-        pass  # highlight only; double-click or button to activate
+        pass
 
     def _create_relay(self) -> None:
         dlg = CreateRelayDialog(self)
@@ -1107,7 +1330,7 @@ class FreePLCGtkApp(tk.Tk):
         self._set_status(f"Relay '{name}' selected.")
 
     # ----------------------------------------------------------
-    # LD element actions
+    # Element management
     # ----------------------------------------------------------
 
     def _add_gate(self, gate_type: str) -> None:
@@ -1120,8 +1343,12 @@ class FreePLCGtkApp(tk.Tk):
         self.wait_window(dlg)
         if dlg.result:
             prog.add_element(dlg.result)
+            # Select the newly added element
+            elements = prog.get_elements()
+            new_idx = len(elements) - 1
+            self._ld_canvas.select_rung(new_idx)
             self._ld_canvas.redraw()
-            self._set_status(f"{gate_type} element added.")
+            self._set_status(f"{gate_type} element added (rung {new_idx + 1}).")
 
     def _remove_element(self) -> None:
         idx = self._ld_canvas.selected_rung
@@ -1138,6 +1365,35 @@ class FreePLCGtkApp(tk.Tk):
             self._ld_canvas.redraw()
             self._set_status(f"Rung {idx + 1} removed.")
 
+    def _move_selected_up(self) -> None:
+        idx = self._ld_canvas.selected_rung
+        prog = self.manager.current_program
+        if idx is None or not prog:
+            self._set_status("Select a rung first.", error=True)
+            return
+        if idx == 0:
+            self._set_status("Already at top.", error=True)
+            return
+        prog.move_element(idx, idx - 1)
+        self._ld_canvas.select_rung(idx - 1)
+        self._ld_canvas.redraw()
+        self._set_status(f"Moved rung {idx + 1} → position {idx}.")
+
+    def _move_selected_down(self) -> None:
+        idx = self._ld_canvas.selected_rung
+        prog = self.manager.current_program
+        if idx is None or not prog:
+            self._set_status("Select a rung first.", error=True)
+            return
+        elements = prog.get_elements()
+        if idx >= len(elements) - 1:
+            self._set_status("Already at bottom.", error=True)
+            return
+        prog.move_element(idx, idx + 1)
+        self._ld_canvas.select_rung(idx + 1)
+        self._ld_canvas.redraw()
+        self._set_status(f"Moved rung {idx + 1} → position {idx + 2}.")
+
     def _clear_program(self) -> None:
         prog = self.manager.current_program
         if not prog:
@@ -1149,7 +1405,6 @@ class FreePLCGtkApp(tk.Tk):
             self._set_status("Program cleared.")
 
     def on_rung_select(self, index: Optional[int]) -> None:
-        """Called by LDCanvas when a rung is selected/deselected."""
         prog = self.manager.current_program
         if index is not None and prog:
             elements = prog.get_elements()
@@ -1194,7 +1449,7 @@ class FreePLCGtkApp(tk.Tk):
             self._run_pill.config(text="● STOPPED", fg=Theme.DANGER)
 
     # ----------------------------------------------------------
-    # Manual I/O control strip
+    # Manual I/O controls
     # ----------------------------------------------------------
 
     def _rebuild_manual_io(self) -> None:
@@ -1241,7 +1496,7 @@ class FreePLCGtkApp(tk.Tk):
         self._set_status(f"Input I{channel} → {'ON' if val else 'OFF'}")
 
     # ----------------------------------------------------------
-    # I/O panel refresh (sidebar)
+    # I/O Panel refresh
     # ----------------------------------------------------------
 
     def _refresh_io_panel(self) -> None:
@@ -1255,7 +1510,6 @@ class FreePLCGtkApp(tk.Tk):
                      font=("TkDefaultFont", 8)).pack(pady=4)
             return
 
-        # Inputs
         self._io_section("Inputs", self._io_inner)
         for ch in sorted(relay.inputs.keys()):
             self._io_row(self._io_inner, f"I{ch}", relay.inputs[ch])
@@ -1267,7 +1521,6 @@ class FreePLCGtkApp(tk.Tk):
         self._io_inner.update_idletasks()
         self._io_canvas.configure(scrollregion=self._io_canvas.bbox("all"))
 
-        # Sync manual buttons
         if hasattr(self, "_input_vars"):
             for ch, var in self._input_vars.items():
                 cur = relay.inputs.get(ch, False)
@@ -1293,7 +1546,7 @@ class FreePLCGtkApp(tk.Tk):
                  padx=4, pady=1, width=4).pack(side=tk.LEFT)
 
     # ----------------------------------------------------------
-    # Periodic I/O refresh
+    # Periodic refresh
     # ----------------------------------------------------------
 
     def _start_io_refresh(self) -> None:
@@ -1313,28 +1566,11 @@ class FreePLCGtkApp(tk.Tk):
             if running:
                 self._refresh_io_panel()
                 self._ld_canvas.redraw()
-                # Scan cycle counter
                 ts = time.strftime("%H:%M:%S")
                 self._scan_lbl.config(text=f"scan  {ts}")
 
-    # ----------------------------------------------------------
-    # Status bar
-    # ----------------------------------------------------------
-
     def _set_status(self, msg: str, error: bool = False) -> None:
         self._status_var.set(msg)
-        fg = Theme.DANGER if error else Theme.SUBTEXT
-        # find the status label (first child of status bar)
-        for w in self.pack_slaves():
-            if isinstance(w, tk.Frame) and w.cget("bg") == Theme.SIDEBAR_BG:
-                for child in w.winfo_children():
-                    if isinstance(child, tk.Label) and child.cget("textvariable"):
-                        child.config(fg=fg)
-                        break
-
-    # ----------------------------------------------------------
-    # Cleanup
-    # ----------------------------------------------------------
 
     def on_close(self) -> None:
         if self.manager.current_program:

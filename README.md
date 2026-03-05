@@ -9,6 +9,8 @@ FreePLC is a Linux program for programming and simulating relays (Programmable L
 - **Multiple relays** — create and manage several named relays, each with its own LD program
 - **Manual I/O control** — toggle individual input channels while the program runs
 - **Background scan cycle** — logic executes every 200 ms in a background thread
+- **Owen Logic-style GTK GUI** — function block palette, drag-and-drop rung reordering,
+  input pins on the left of the canvas, output pins on the right
 - **Windowed GUI** (Python/tkinter) and a console UI (C++/ncurses) both included
 
 ---
@@ -17,9 +19,23 @@ FreePLC is a Linux program for programming and simulating relays (Programmable L
 
 The main interface is a cross-platform windowed GUI written in Python using the standard
 `tkinter` library — no extra dependencies required. It uses a GTK/GNOME (Adwaita) visual
-style and features a **visual Ladder Diagram (LD) canvas** that renders each program rung
-using standard PLC notation (contacts and coils), similar to professional PLC editors like
-Owen Logic / Codesys.
+style and features a **visual Ladder Diagram (LD) canvas** styled after professional PLC
+editors like Owen Logic / Codesys.
+
+### Key features
+
+- **Owen Logic-style function blocks** — each rung displays a graphical function block
+  (rectangle with colored header) with input pins on the **left side** and output pins on the **right side**.
+- **Left power rail with input pins** — all relay inputs (I1..In) are labeled and shown
+  on the **left side** of the canvas, wired into the left power rail.
+- **Right power rail with output pins** — all relay outputs (Q1..Qn) are labeled and shown
+  on the **right side** of the canvas, wired out of the right power rail.
+- **Dark toolbox panel** — a left-hand panel (Owen Logic style) lists all available function
+  block types (AND, OR, NOT, RS) with descriptions and one-click add buttons.
+- **Drag-and-drop rung reordering** — drag any rung up or down on the canvas to change the
+  execution order. Use the ⬆/⬇ buttons in the toolbox as an alternative.
+- **Live I/O state visualization** — active input pins and energized output pins are
+  highlighted in real time during simulation.
 
 ### Requirements
 
@@ -32,30 +48,41 @@ Owen Logic / Codesys.
 python3 freeplc_gui_gtk.py
 ```
 
-### LD Canvas — standard symbols
+### Layout overview
 
-| Symbol | Notation | Meaning |
-|--------|----------|---------|
-| Normally-Open contact | `--\| \|--` | Reads an input; passes power when input is ON |
-| Normally-Closed contact | `--\|/\|--` | Negated input (NOT); passes power when input is OFF |
-| Output coil | `--(  )--` | Writes an output; energised when rung evaluates TRUE |
-| Set coil | `--(S)--` | RS latch Set; output stays ON until Reset |
-| Parallel branch | OR join | Second contact shown as a parallel branch on the rung |
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ FreePLC                                   ▶ Run   ⏹ Stop  ● STOPPED    │  ← Header bar
+├───────────────┬────────────────────────────────────────────┬────────────┤
+│ FUNCTION      │  INPUTS │                     │ OUTPUTS   │ Relays     │
+│ BLOCKS        │  ──I1── │    [ AND block ]    │ ──Q1──    │            │
+│               │  ──I2── │  I1 ┤AND├ Q1        │ ──Q2──    │ I/O Status │
+│  [AND]  +Add  │  ──I3── │  I2 ┤   ├           │           │            │
+│  [OR]   +Add  │  ...    │                     │ ...       │            │
+│  [NOT]  +Add  │         │   Left rail     Right rail      │            │
+│  [RS]   +Add  │         │                                 │            │
+│               │         │  ← Ladder Diagram canvas →      │            │
+│  ✕ Remove     │─────────┴────────────────────────────────┤            │
+│  ⬆ Move Up    │    Manual Input Control (I1 I2 I3 ...)    │            │
+│  ⬇ Move Down  │                                           │            │
+└───────────────┴───────────────────────────────────────────┴────────────┘
+```
 
 ### Usage
 
-1. **Sidebar — Relays** — click **＋ New Relay** to create a relay with configurable input/output
-   channels, then **✓ Select** (or double-click) to make it active.
-2. **Sidebar — Add Element** — click **AND**, **OR**, **NOT**, or **RS** to open a GTK-style
-   dialog and configure channel numbers. The element appears immediately on the LD canvas as a
-   graphical rung.
+1. **Function block toolbox** (left dark panel) — click **+ Add AND/OR/NOT/RS** to open a
+   dialog, configure input/output channel numbers, and add the block to the program.
+2. **Ladder Diagram canvas** (center) — each rung shows a graphical function block:
+   - Input pins are on the **left side** of the block, wired to the left power rail (inputs)
+   - Output pins are on the **right side** of the block, wired to the right power rail (outputs)
+   - **Drag a rung** up or down to reorder the execution sequence
+   - **Click a rung** to select it (highlighted in blue)
 3. **Header bar — ▶ Run / ⏹ Stop** — start or stop the 200 ms scan cycle. The status pill
    shows **RUNNING** (green) / **STOPPED** (red).
-4. **Manual Input Control strip** (below the canvas) — click an input button to toggle it ON/OFF
-   in real time. Active contacts on the canvas light up in blue; energised coils light up in red
-   or green.
-5. **Sidebar — I/O Status** — live ON/OFF indicator for every input and output channel.
-6. **Click a rung** on the canvas to select it, then click **✕ Remove Selected** to delete it.
+4. **Manual Input Control strip** (below canvas) — click an input button to toggle it ON/OFF
+   in real time. Active pins on the canvas light up in color.
+5. **Right sidebar — I/O Status** — live ON/OFF indicator for every input and output channel.
+6. **Toolbox — ✕ Remove / ⬆⬇ Move** — remove the selected rung or reorder it with the arrow buttons.
 
 ## Python GUI (classic tkinter, alternative)
 
