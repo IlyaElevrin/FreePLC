@@ -2,3 +2,6 @@ build/
 experiments/test_logic
 *.o
 *.a
+__pycache__/
+*.pyc
+*.pyo
